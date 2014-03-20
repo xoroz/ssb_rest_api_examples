@@ -32,7 +32,7 @@ function fetch_logs {
 function print_logs {
     RAW_LOGS=$@
     echo $RAW_LOGS | jq -c -M '.[].message'
-    #echo $RAW_LOGS | jq -c -M '.[] | {timestamp: .received_timestamp, message: .message}'
+    #echo $RAW_LOGS | jq -c -M '.[] | {timestamp: .processed_timestamp, message: .message}'
 }
 
 # let's find the last message and their start timestamp
@@ -43,7 +43,7 @@ if [ $OFFSET -lt 0 ]
 then
     OFFSET=0
 fi
-FROM=$(api_request "filter/$LOGSPACE?search_expression=$SEARCH_EXPRESSION&from=0&to=$TO&offset=$OFFSET&limit=1" | jq '.[0].received_timestamp')
+FROM=$(api_request "filter/$LOGSPACE?search_expression=$SEARCH_EXPRESSION&from=0&to=$TO&offset=$OFFSET&limit=1" | jq '.[0].processed_timestamp')
 NUM_OF_MESSAGES=$(api_request "number_of_messages/$LOGSPACE?search_expression=$SEARCH_EXPRESSION&from=$FROM&to=$TO")
 # let's display the last 10 messages again...
 OFFSET=$[$NUM_OF_MESSAGES - 10]

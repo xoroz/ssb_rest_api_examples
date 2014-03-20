@@ -9,7 +9,7 @@ LINES_PER_FETCH=1000
 
 SEARCH_EXPRESSION=$1
 
-SESSID=`wget -q --no-check-certificate -O - "https://$SSB_IP/api/1/login" --post-data='username=$USERNAME&password=$PASSWORD' | jq '.result' -r`
+SESSID=`wget -q --no-check-certificate -O - "https://$SSB_IP/api/1/login" --post-data="username=$USERNAME&password=$PASSWORD" | jq '.result' -r`
 
 LAST_MINUTE=0
 

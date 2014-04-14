@@ -173,20 +173,20 @@ class KWayMergeTests(unittest.TestCase):
         MAGIC = 123456
         simplefetcher = lambda: MAGIC
         merger = KWayMerger((simplefetcher,))
-        self.assertEqual(merger.next(), MAGIC)
+        self.assertEqual(MAGIC, merger.next())
 
     def test_first_next_returns_the_first_from_10(self):
         fetchers = []
         for i in range(10):
             fetchers.append(MockFetcher([i]).next)
         merger = KWayMerger(tuple(fetchers))
-        self.assertEqual(merger.next(), 0)
+        self.assertEqual(0, merger.next())
 
     def test_two_elements_are_sorted_well(self):
         merger = KWayMerger((MockFetcher([2]).next, MockFetcher([1]).next))
 
-        self.assertEqual(merger.next(), 1)
-        self.assertEqual(merger.next(), 2)
+        self.assertEqual(1, merger.next())
+        self.assertEqual(2, merger.next())
 
     def test_one_ordered_list_is_returned_as_is(self):
         merger = KWayMerger((MockFetcher(list(range(10))).next,))
@@ -222,7 +222,7 @@ class KWayMergeTests(unittest.TestCase):
         merger = KWayMerger(tuple(fetchers))
 
         for i in range(LIST_LENGTH * NUMBER_OF_LISTS):
-            self.assertEqual(merger.next(), i)
+            self.assertEqual(i, merger.next())
 
 
 class MockFetcher:

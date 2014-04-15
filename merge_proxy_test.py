@@ -26,7 +26,7 @@ class SSBAPITests(unittest.TestCase):
     def test_login_calls_a_post_to_the_login_point_in_the_api(self):
         (method, url, body, headers) = self._do_a_login_and_get_first_request()
         self.assertEqual("POST", method)
-        self.assertEqual("api/1/login", url)
+        self.assertEqual("/api/1/login", url)
 
     def _do_a_login_and_get_first_request(self):
         requests = self._do_a_login_and_get_requests()
@@ -40,7 +40,7 @@ class SSBAPITests(unittest.TestCase):
     def test_list_logspaces_proxies_list_logspaces(self):
         self._test_object_call_proxies_api_call(
             object_func="list_logspaces",
-            api_url="api/1/search/logspace/list_logspaces",
+            api_url="/api/1/search/logspace/list_logspaces",
             response_value=["logspace1", "foo", "bar", "logspace4"]
         )
 
@@ -58,9 +58,24 @@ class SSBAPITests(unittest.TestCase):
         self.assertEqual(len(requests), 2)  # again, the first one was the login
         (method, url, body, headers) = requests[1]
         self.assertEqual("GET", method)
-        self.assertEqual(api_url, url)
+        self._assertURLEqual(api_url, url)
         if response_value is not None:
             self.assertEqual(response_value, result)
+
+    def _assertURLEqual(self, expected, actual):
+        expected_parsed = urllib.parse.urlparse(expected)
+        actual_parsed = urllib.parse.urlparse(actual)
+
+        # these fields need to match char-by-char
+        for field in ('scheme', 'netloc', 'path'):
+            self.assertEqual(getattr(expected_parsed, field), getattr(actual_parsed, field))
+
+        # but the sequence is not important in the query
+        expected_query = urllib.parse.parse_qs(expected_parsed.query)
+        actual_query = urllib.parse.parse_qs(actual_parsed.query)
+        self.assertDictEqual(expected_query, actual_query)
+
+
 
     def _generate_successful_response(self, object_to_return):
         return "{\"result\": %s}" % json.dumps(object_to_return)
@@ -68,33 +83,36 @@ class SSBAPITests(unittest.TestCase):
     def test_logout_is_proxied_to_logout(self):
         self._test_object_call_proxies_api_call(
             object_func="logout",
-            api_url="api/1/logout",
+            api_url="/api/1/logout",
         )
 
     def test_filter_proxies_filter(self):
-        self._test_filter_type_command("filter", "filter", [{"logmsg1": "logvalue1"}, {"logmsg2": "logvalue2"}])
+        self._test_filter_type_command("filter", "filter",
+                                       [{"logmsg1": "logvalue1"}, {"logmsg2": "logvalue2"}], True)
 
-    def _test_filter_type_command(self, object_func, api_command_in_url, return_value):
+    def _test_filter_type_command(self, object_func, api_command_in_url, return_value, add_limit_offset):
         test_from = 123
         test_to = 456
         test_expression = "search_expression"
         test_offset = 222
         test_limit = 333
 
-        expected_params = urllib.parse.urlencode(
-            {'from': test_from, 'to': test_to, 'search_expressions': test_expression,
-             'offset': test_offset, 'limit': test_limit}
-        )
+        expected_params = {'from': test_from, 'to': test_to, 'search_expression': test_expression}
+        if add_limit_offset:
+            expected_params["offset"] = test_offset
+            expected_params["limit"] = test_limit
+
+        expected_params = urllib.parse.urlencode(expected_params)
 
         self._test_object_call_proxies_api_call(
             object_func=object_func,
             args=(self.LOGSPACE_NAME, test_from, test_to, test_expression, test_offset, test_limit),
-            api_url="api/1/search/logspace/%s/%s?%s" % (api_command_in_url, self.LOGSPACE_NAME, expected_params),
+            api_url="/api/1/search/logspace/%s/%s?%s" % (api_command_in_url, self.LOGSPACE_NAME, expected_params),
             response_value=return_value
         )
 
     def test_number_of_messages_proxies_number_of_messages(self):
-        self._test_filter_type_command("number_of_messages", "number_of_messages", 999)
+        self._test_filter_type_command("number_of_messages", "number_of_messages", 999, False)
 
     def test_auth_token_is_included_in_later_calls_after_login(self):
         (connection, api) = self._get_connection_api_pair()
@@ -118,8 +136,9 @@ class SSBAPITests(unittest.TestCase):
         self.assertEqual(5, len(requests))  # just playing safe, we've tested this above
         for i in range(1, 5):
             (method, url, body, headers) = requests[i]
-            self.assertTrue("AUTHENTICATION_TOKEN" in headers)
-            self.assertEqual(AUTH_TOKEN, headers['AUTHENTICATION_TOKEN'])
+            self.assertTrue("Cookie" in headers)
+            cookies = urllib.parse.unquote(headers['Cookie'])
+            self.assertEqual("AUTHENTICATION_TOKEN=%s" % AUTH_TOKEN, headers['Cookie'])
 
 
 class MockHTTPConnection:
@@ -143,7 +162,8 @@ class MockHTTPConnection:
     def getresponse(self):
         if len(self.responses) > 0:
             response_data = self.responses.pop(0)
-        else:
+
+        if response_data is None:
             response_data = ""
 
         return MockHTTPResponse(200, response_data)
@@ -152,10 +172,13 @@ class MockHTTPConnection:
 class MockHTTPResponse:
     def __init__(self, status, data):
         self.status = status
-        self.data = data
+        self.data = str.encode(data)
 
     def read(self):
         return self.data
+
+    def readall(self):
+        return self.read()
 
 
 class KWayMergeTests(unittest.TestCase):

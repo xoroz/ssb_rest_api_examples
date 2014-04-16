@@ -171,6 +171,9 @@ class MockHTTPConnection:
 
         return MockHTTPResponse(200, response_data)
 
+    def close(self):
+        pass
+
 
 class MockHTTPResponse:
     def __init__(self, status, data):

@@ -1,8 +1,9 @@
-__author__ = 'gyp'
+__author__ = 'gyp@balabit.com'
 import http.client
 import urllib.parse
 import json
 import datetime
+import cherrypy
 
 
 class SSBAPI:
@@ -30,6 +31,7 @@ class SSBAPI:
         response = self.conn.getresponse()
         raw_response = response.readall().decode()
         response_body = json.loads(raw_response)
+        self.conn.close()
         return response_body['result']
 
     def _authenticated_get_query(self, get_query):
@@ -147,8 +149,36 @@ class MergeProxy(SSBAPI):
                                         offset=0, limit=limit)
 
         logs = sorted(logs, key=lambda log: log['processed_timestamp'])
-        logs = logs[:limit]
+        logs = logs[:int(limit)]
         return(logs)
+
+
+class MergeProxyServer:
+    # FIXME: all the results should be wrapped into the required base structure
+    def __init__(self, merge_proxy: MergeProxy):
+        self.merge_proxy = merge_proxy
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def list_logspaces(self):
+        return self._json_safe_object(self.merge_proxy.list_logspaces())
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def filter(self, logspace, **kwargs):
+        result = self.merge_proxy.filter(logspace, **kwargs)
+        return self._json_safe_object(result)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def number_of_messages(self, logspace, **kwargs):
+        result = self.merge_proxy.number_of_messages(logspace, **kwargs)
+        return self._json_safe_object(result)
+
+    def _json_safe_object(self, object_to_convert):
+        if type(object_to_convert) == type(set()):
+            object_to_convert = list(object_to_convert)
+        return object_to_convert
 
 
 def print_logs(list_of_logs):
@@ -157,26 +187,24 @@ def print_logs(list_of_logs):
         print("%s %s %s: %s" % (pretty_date, log['host'], log['program'], log['message']))
 
 if __name__ == '__main__':
-    test_from = 1397665266
-    test_limit = 50
-    print("Trying first SSB...")
+    # FIXME: move this out to a configfile
     ssb1 = SSB('10.120.29.121')
-    ssb1.login('admin', 'a')
-    print(ssb1.list_logspaces())
-    print(ssb1.number_of_messages(logspace = 'local', search_expression='statistics', from_timestamp=test_from))
-    print_logs(ssb1.filter(logspace = 'local', search_expression='statistics', limit=test_limit, from_timestamp=test_from))
-
-    print("\nTrying second SSB...")
     ssb2 = SSB('10.120.29.122')
+    ssb1.login('admin', 'a')
     ssb2.login('admin', 'a')
-    print(ssb2.list_logspaces())
-    print(ssb2.number_of_messages(logspace = 'local', search_expression='statistics', from_timestamp=test_from))
-    print_logs(ssb2.filter(logspace = 'local', search_expression='statistics', limit=test_limit, from_timestamp=test_from))
 
-    print("\nTrying the merged stuff...")
-    merged = MergeProxy((ssb1, ssb2))
-    print(merged.number_of_messages(logspace = 'local', search_expression='statistics', from_timestamp=test_from))
-    print_logs(merged.filter(logspace = 'local', search_expression='statistics', limit=test_limit, from_timestamp=test_from))
+    merge_proxy = MergeProxy((ssb1, ssb2))
+    server = MergeProxyServer(merge_proxy)
+
+    cherrypy.tree.mount(
+        server, '/api/1/search/logspace'
+    )
+    cherrypy.server.ssl_module = 'builtin'
+    cherrypy.server.ssl_certificate = "merge_proxy.pem"
+    cherrypy.server.ssl_private_key = "merge_proxy.pem"
+    cherrypy.engine.start()
+    cherrypy.engine.block()
+
 
 
 

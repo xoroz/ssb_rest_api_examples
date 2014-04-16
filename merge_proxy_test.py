@@ -41,7 +41,7 @@ class SSBAPITests(unittest.TestCase):
         self._test_object_call_proxies_api_call(
             object_func="list_logspaces",
             api_url="/api/1/search/logspace/list_logspaces",
-            response_value=["logspace1", "foo", "bar", "logspace4"]
+            response_value={"logspace1", "foo", "bar", "logspace4"}
         )
 
     def _test_object_call_proxies_api_call(self, object_func, api_url, args=(), response_value=None):
@@ -75,10 +75,13 @@ class SSBAPITests(unittest.TestCase):
         actual_query = urllib.parse.parse_qs(actual_parsed.query)
         self.assertDictEqual(expected_query, actual_query)
 
-
-
     def _generate_successful_response(self, object_to_return):
-        return "{\"result\": %s}" % json.dumps(object_to_return)
+        return "{\"result\": %s}" % self._object_to_json(object_to_return)
+
+    def _object_to_json(self, object_to_convert):
+        if type(object_to_convert) == type(set()):
+            object_to_convert = list(object_to_convert)
+        return json.dumps(object_to_convert)
 
     def test_logout_is_proxied_to_logout(self):
         self._test_object_call_proxies_api_call(
@@ -259,6 +262,235 @@ class MockFetcher:
             return None
 
     #TODO_fetches_are_not_called_multiple_times
+
+class MergeProxyTest(unittest.TestCase):
+    LOGSPACE_NAME = "testlogspacename"
+
+    def test_class_can_be_initialized_with_a_tuple_of_SSBs(self):
+        MergeProxy((MockSSB(), MockSSB()))
+
+    def test_list_logspaces_with_a_single_SSB_is_passed_through(self):
+        test_logspaces = {"logspace1", "logspace2", "logspace3"}
+        ssb = MockSSB()
+        ssb.set_logspaces(test_logspaces)
+
+        proxy = MergeProxy((ssb, ))
+
+        self.assertEqual(test_logspaces, proxy.list_logspaces())
+
+    def test_list_logspaces_results_are_merged_from_two_SSBs(self):
+        test_logspaces_1 = {"logspace1", "logspace2", "logspace3"}
+        test_logspaces_2 = {"logspace1", "logspace2",              "logspace4"}
+        merged_result =    {"logspace1", "logspace2", "logspace3", "logspace4"}
+
+        ssb1 = MockSSB()
+        ssb2 = MockSSB()
+        ssb1.set_logspaces(test_logspaces_1)
+        ssb2.set_logspaces(test_logspaces_2)
+        proxy = MergeProxy((ssb1, ssb2))
+
+        self.assertSetEqual(merged_result, proxy.list_logspaces())
+
+    def test_list_logspaces_merges_from_lots_of_SSBs(self):
+        ssbs = []
+        for i in range(10):
+            new_ssb = MockSSB()
+            logspaces = set(range(i+1))
+            new_ssb.set_logspaces(logspaces)
+            ssbs.append(new_ssb)
+        ssbs = tuple(ssbs)
+
+        proxy = MergeProxy(ssbs)
+
+        self.assertSetEqual(set(range(10)), proxy.list_logspaces())
+
+    def test_number_of_messages_is_passed_through_if_theres_a_single_SSB(self):
+        NUMBER_OF_MESSAGES = 999
+
+        ssb = MockSSB()
+        ssb.set_number_of_messages(NUMBER_OF_MESSAGES)
+
+        proxy = MergeProxy((ssb, ))
+
+        self.assertEqual(NUMBER_OF_MESSAGES, proxy.number_of_messages(self.LOGSPACE_NAME))
+
+    def test_number_of_messages_params_are_passed_through(self):
+        TEST_FROM = 123
+        TEST_TO = 456
+        TEST_EXPRESSION = "text expression"
+
+        ssb = MockSSB()
+        proxy = MergeProxy((ssb, ))
+
+        proxy.number_of_messages(self.LOGSPACE_NAME, TEST_FROM, TEST_TO, TEST_EXPRESSION)
+
+        calls = ssb.get_calls()
+        self.assertEqual(1, len(calls))
+        self.assertEqual("number_of_messages", calls[0]['func'])
+        self.assertTupleEqual((self.LOGSPACE_NAME, TEST_FROM, TEST_TO, TEST_EXPRESSION), calls[0]['args'])
+
+    def test_number_of_messages_is_added_from_multiple_SSBs(self):
+        ssbs = []
+        expected_sum = 0
+        for i in range(10):
+            new_ssb = MockSSB()
+            new_num_messages = pow(i, 3)
+            new_ssb.set_number_of_messages(new_num_messages)
+            expected_sum += new_num_messages
+            ssbs.append(new_ssb)
+
+        proxy = MergeProxy(tuple(ssbs))
+
+        self.assertEqual(expected_sum, proxy.number_of_messages(self.LOGSPACE_NAME))
+
+    def test_filter_is_passed_through_if_theres_a_single_SSB(self):
+        LOGS = [{'processed_timestamp': 123, 'message': "testmessage"}]
+
+        ssb = MockSSB()
+        ssb.set_logs(LOGS)
+
+        proxy = MergeProxy((ssb, ))
+
+        self.assertListEqual(LOGS, proxy.filter(self.LOGSPACE_NAME))
+
+    def test_filter_params_are_passed_through(self):
+        TEST_FROM = 123
+        TEST_TO = 456
+        TEST_EXPRESSION = "text expression"
+
+        ssb = MockSSB()
+        proxy = MergeProxy((ssb, ))
+
+        proxy.filter(self.LOGSPACE_NAME, TEST_FROM, TEST_TO, TEST_EXPRESSION)
+
+        calls = ssb.get_calls()
+        self.assertEqual(1, len(calls))
+        self.assertEqual("filter", calls[0]['func'])
+        # NOTE: this is nasty and only passes because we pass offset and limit as kwargs... but hey, it's a PoC :)
+        self.assertTupleEqual((self.LOGSPACE_NAME, TEST_FROM, TEST_TO, TEST_EXPRESSION), calls[0]['args'])
+
+    def test_filter_result_count_is_sum_of_underlying_SSBs(self):
+        ssbs = []
+        expected_log_count = 0
+
+        for i in range(10):
+            new_ssb = MockSSB()
+            new_logs = []
+            for j in range(i):
+                new_logs.append({'processed_timestamp': 0, 'id': j})
+
+            expected_log_count += len(new_logs)
+            new_ssb.set_logs(new_logs)
+            ssbs.append(new_ssb)
+
+        proxy = MergeProxy(tuple(ssbs))
+
+        self.assertEqual(expected_log_count, len(proxy.filter(self.LOGSPACE_NAME, limit=(expected_log_count*2))))
+
+    def test_filter_results_contain_all_the_elements_from_the_underlying_SSBs(self):
+        ssbs = []
+        expected_ids = set()
+
+        for i in range(10):
+            new_ssb = MockSSB()
+            new_logs = []
+            for j in range(100):
+                new_id = "ssb%d log%i" % (i, j)
+                expected_ids.add(new_id)
+                new_logs.append({'processed_timestamp': 0, 'id': new_id})
+
+            new_ssb.set_logs(new_logs)
+            ssbs.append(new_ssb)
+
+        proxy = MergeProxy(tuple(ssbs))
+
+        # comparing them as sets will work because we gave them unique ids
+        merged_results = proxy.filter(self.LOGSPACE_NAME, limit=len(expected_ids)*2)
+        actual_ids = set()
+        for result in merged_results:
+            actual_ids.add(result['id'])
+
+        self.assertSetEqual(expected_ids, actual_ids)
+
+    def test_filter_results_are_ascending_according_to_processed_timestamp_but_per_ssb_order_is_retained(self):
+        ssbs = []
+
+        # The logs are ordered in overlapping but ascending sequence is guaranteed in
+        # each of the lists
+        num_of_ssbs = 10
+        for i in range(num_of_ssbs):
+            new_ssb = MockSSB()
+            new_logs = []
+            timestamp_base = num_of_ssbs*10 - 3*i
+            for j in range(100):
+                timestamp = timestamp_base + 2 * j
+                # we add two logs with the same timestamp to be able to check if the orginal ordering is retained
+                new_logs.append({'processed_timestamp': timestamp, 'host': i, 'id': 2*j})
+                new_logs.append({'processed_timestamp': timestamp, 'host': i, 'id': 2*j+1})
+            new_ssb.set_logs(new_logs)
+            ssbs.append(new_ssb)
+
+        proxy = MergeProxy(tuple(ssbs))
+        merged_results = proxy.filter(self.LOGSPACE_NAME)
+
+        previous_log = None
+        previous_ids = {}
+        for i in range(num_of_ssbs):
+            previous_ids[i] = None
+
+        for current_log in merged_results:
+            if previous_log is not None:
+                self.assertGreaterEqual(current_log['processed_timestamp'], previous_log['processed_timestamp'])
+            if previous_ids[current_log['host']] is not None:
+                self.assertGreater(current_log['id'], previous_ids[current_log['host']])
+            previous_log = current_log
+            previous_ids[current_log['host']] = current_log['id']
+
+    def test_filter_returns_limit_number_of_elements(self):
+        ssbs = []
+        limit_to_test = 25
+        for i in range(10):
+            new_ssb = MockSSB()
+            logs_per_ssb = limit_to_test * 2
+            new_logs = [{'processed_timestamp': 0}] * logs_per_ssb
+            new_ssb.set_logs(new_logs)
+            ssbs.append(new_ssb)
+
+        proxy = MergeProxy(tuple(ssbs))
+
+        self.assertEqual(limit_to_test, len(proxy.filter(self.LOGSPACE_NAME, limit=limit_to_test)))
+
+
+class MockSSB():
+    def __init__(self):
+        self.logspaces = set()
+        self.calls = []
+        self._number_of_messages = 0
+        self._logs = []
+
+    def set_logspaces(self, logspaces):
+        self._logspaces = logspaces
+
+    def set_logs(self, logs):
+        self._logs = logs
+
+    def set_number_of_messages(self, number_of_messages):
+        self._number_of_messages = number_of_messages
+
+    def get_calls(self):
+        return self.calls
+
+    def number_of_messages(self, *args, **kwargs):
+        self.calls.append({"func": "number_of_messages", "args": args, "kwarg": kwargs})
+        return self._number_of_messages
+
+    def filter(self, *args, **kwargs):
+        self.calls.append({"func": "filter", "args": args, "kwarg": kwargs})
+        return self._logs
+
+    def list_logspaces(self):
+        return self._logspaces
+
 
 if __name__ == '__main__':
     unittest.main()

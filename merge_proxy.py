@@ -4,6 +4,7 @@ import urllib.parse
 import json
 import datetime
 import cherrypy
+import configparser
 
 
 class SSBAPI:
@@ -181,19 +182,37 @@ class MergeProxyServer:
         return object_to_convert
 
 
+class MergeProxyConfig():
+    def __init__(self, config_text):
+        self._config = configparser.ConfigParser()
+        self._config.read_string(config_text)
+
+    def get_servers(self):
+        servers = []
+        for server_name in self._config.sections():
+            user = self._config[server_name]['user']
+            password = self._config[server_name]['password']
+            servers.append({'address': server_name, 'user': user, 'password': password})
+        return servers
+
+
 def print_logs(list_of_logs):
     for log in list_of_logs:
         pretty_date = datetime.datetime.fromtimestamp(log['processed_timestamp']).strftime('%Y-%m-%d %H:%M:%S')
         print("%s %s %s: %s" % (pretty_date, log['host'], log['program'], log['message']))
 
 if __name__ == '__main__':
-    # FIXME: move this out to a configfile
-    ssb1 = SSB('10.120.29.121')
-    ssb2 = SSB('10.120.29.122')
-    ssb1.login('admin', 'a')
-    ssb2.login('admin', 'a')
+    with open('merge_proxy.ini', 'r') as configfile:
+        config_text = '\n'.join(configfile.readlines())
+    config = MergeProxyConfig(config_text)
+    servers = []
+    for server_params in config.get_servers():
+        ssb = SSB(server_params['address'])
+        ssb.login(server_params['user'], server_params['password'])
+        servers.append(ssb)
+    servers = tuple(servers)
 
-    merge_proxy = MergeProxy((ssb1, ssb2))
+    merge_proxy = MergeProxy(servers)
     server = MergeProxyServer(merge_proxy)
 
     cherrypy.tree.mount(

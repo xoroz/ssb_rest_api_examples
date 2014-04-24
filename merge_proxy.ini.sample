@@ -1,0 +1,7 @@
+[10.10.0.1]
+user=user1
+password=foo
+
+[example.foo.bar]
+user=user2
+password=bar

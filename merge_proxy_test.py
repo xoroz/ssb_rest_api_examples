@@ -494,6 +494,31 @@ class MockSSB():
     def list_logspaces(self):
         return self._logspaces
 
+class MergeProxyConfigTest(unittest.TestCase):
+    def test_get_servers_returns_a_list(self):
+        servers = self._feed_with_sample_2_server_config_and_return_what_get_servers_returns()
+        self.assertEqual(type(list()), type(servers))
+
+    def _feed_with_sample_2_server_config_and_return_what_get_servers_returns(self):
+        config_text = """
+[server1.serverhost]
+user=a
+password=a
+[1.2.3.4]
+user=a
+password=a
+"""
+        config = MergeProxyConfig(config_text)
+        return config.get_servers()
+
+    def test_returns_all_servers(self):
+        servers = self._feed_with_sample_2_server_config_and_return_what_get_servers_returns()
+        self.assertEqual(2, len(servers))
+
+    def test_all_returned_servers_are_objects_with_user_and_pass_fields(self):
+        servers = self._feed_with_sample_2_server_config_and_return_what_get_servers_returns()
+        for server in servers:
+            self.assertEqual(type({}), type(server))
 
 if __name__ == '__main__':
     unittest.main()

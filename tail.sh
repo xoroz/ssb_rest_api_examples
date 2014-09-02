@@ -1,8 +1,7 @@
 #!/bin/bash
 
-SSB_IP=10.120.29.122
-USERNAME=admin
-PASSWORD=a
+. ssb_credentials
+
 LOGSPACE=center
 SLEEP=2
 LINES_PER_FETCH=1000
